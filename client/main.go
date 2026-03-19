@@ -128,6 +128,24 @@ func (lc stdListenConfig) ListenPacket(ctx context.Context, network, address str
 	return lc.ListenConfig.ListenPacket(ctx, network, address)
 }
 
+func closeWithLog(closer io.Closer, msg string) {
+	if err := closer.Close(); err != nil {
+		log.Printf("%s: %v", msg, err)
+	}
+}
+
+func setDeadlineWithLog(conn interface{ SetDeadline(time.Time) error }, t time.Time, msg string) {
+	if err := conn.SetDeadline(t); err != nil {
+		log.Printf("%s: %v", msg, err)
+	}
+}
+
+func setReadDeadlineWithLog(conn interface{ SetReadDeadline(time.Time) error }, t time.Time, msg string) {
+	if err := conn.SetReadDeadline(t); err != nil {
+		log.Printf("%s: %v", msg, err)
+	}
+}
+
 func getVkCreds(link string) (string, string, string, error) {
 	doRequest := func(data string, url string) (resp map[string]interface{}, err error) {
 		client := &http.Client{
@@ -151,7 +169,7 @@ func getVkCreds(link string) (string, string, string, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer httpResp.Body.Close()
+		defer closeWithLog(httpResp.Body, "failed to close response body")
 
 		body, err := io.ReadAll(httpResp.Body)
 		if err != nil {
@@ -382,7 +400,7 @@ func getYandexCreds(link string) (string, string, string, error) {
 	if err != nil {
 		return "", "", "", err
 	}
-	defer resp.Body.Close()
+	defer closeWithLog(resp.Body, "failed to close conference response body")
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return "", "", "", fmt.Errorf("GetConference: status=%s body=%s", resp.Status, string(body))
@@ -410,7 +428,7 @@ func getYandexCreds(link string) (string, string, string, error) {
 	if err != nil {
 		return "", "", "", fmt.Errorf("ws dial: %w", err)
 	}
-	defer conn.Close()
+	defer closeWithLog(conn, "failed to close websocket connection")
 
 	req1 := HelloRequest{
 		UID: uuid.New().String(),
@@ -482,7 +500,7 @@ func getYandexCreds(link string) (string, string, string, error) {
 		return "", "", "", fmt.Errorf("ws write: %w", err)
 	}
 
-	conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+	setReadDeadlineWithLog(conn, time.Now().Add(15*time.Second), "failed to set websocket read deadline")
 
 	for {
 		_, msg, err := conn.ReadMessage()
@@ -590,8 +608,8 @@ func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.Pa
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	context.AfterFunc(dtlsctx, func() {
-		listenConn.SetDeadline(time.Now())
-		dtlsConn.SetDeadline(time.Now())
+		setDeadlineWithLog(listenConn, time.Now(), "failed to set listener deadline")
+		setDeadlineWithLog(dtlsConn, time.Now(), "failed to set DTLS deadline")
 	})
 	var addr atomic.Value
 	// Start read-loop on listenConn
@@ -652,8 +670,8 @@ func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.Pa
 	}()
 
 	wg.Wait()
-	listenConn.SetDeadline(time.Time{})
-	dtlsConn.SetDeadline(time.Time{})
+	setDeadlineWithLog(listenConn, time.Time{}, "failed to clear listener deadline")
+	setDeadlineWithLog(dtlsConn, time.Time{}, "failed to clear DTLS deadline")
 }
 
 type connectedUDPConn struct {
@@ -788,8 +806,8 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 	wg.Add(2)
 	turnctx, turncancel := context.WithCancel(context.Background())
 	context.AfterFunc(turnctx, func() {
-		relayConn.SetDeadline(time.Now())
-		conn2.SetDeadline(time.Now())
+		setDeadlineWithLog(relayConn, time.Now(), "failed to set relay deadline")
+		setDeadlineWithLog(conn2, time.Now(), "failed to set TURN peer deadline")
 	})
 	var addr atomic.Value
 	// Start read-loop on conn2 (output of DTLS)
@@ -850,8 +868,8 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 	}()
 
 	wg.Wait()
-	relayConn.SetDeadline(time.Time{})
-	conn2.SetDeadline(time.Time{})
+	setDeadlineWithLog(relayConn, time.Time{}, "failed to clear relay deadline")
+	setDeadlineWithLog(conn2, time.Time{}, "failed to clear TURN peer deadline")
 }
 
 func oneDtlsConnectionLoop(ctx context.Context, peer *net.UDPAddr, listenConnChan <-chan net.PacketConn, connchan chan<- net.PacketConn, okchan chan<- struct{}) {
