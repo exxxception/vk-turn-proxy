@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -16,6 +17,30 @@ import (
 	"github.com/pion/dtls/v3"
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
 )
+
+func closeWithLog(closer io.Closer, msg string) {
+	if err := closer.Close(); err != nil {
+		log.Printf("%s: %v", msg, err)
+	}
+}
+
+func setDeadlineWithLog(conn interface{ SetDeadline(time.Time) error }, t time.Time, msg string) {
+	if err := conn.SetDeadline(t); err != nil {
+		log.Printf("%s: %v", msg, err)
+	}
+}
+
+func setReadDeadlineWithLog(conn interface{ SetReadDeadline(time.Time) error }, t time.Time, msg string) {
+	if err := conn.SetReadDeadline(t); err != nil {
+		log.Printf("%s: %v", msg, err)
+	}
+}
+
+func setWriteDeadlineWithLog(conn interface{ SetWriteDeadline(time.Time) error }, t time.Time, msg string) {
+	if err := conn.SetWriteDeadline(t); err != nil {
+		log.Printf("%s: %v", msg, err)
+	}
+}
 
 func main() {
 	listen := flag.String("listen", "0.0.0.0:56000", "listen on ip:port")
@@ -89,11 +114,7 @@ func main() {
 		wg1.Add(1)
 		go func(conn net.Conn) {
 			defer wg1.Done()
-			defer func() {
-				if closeErr := conn.Close(); closeErr != nil {
-					log.Printf("failed to close incoming connection: %s", closeErr)
-				}
-			}()
+			defer closeWithLog(conn, "failed to close incoming connection")
 			var err error = nil
 			log.Printf("Connection from %s\n", conn.RemoteAddr())
 			// `conn` is of type `net.Conn` but may be casted to `dtls.Conn`
@@ -133,12 +154,8 @@ func main() {
 			wg.Add(2)
 			ctx2, cancel2 := context.WithCancel(ctx)
 			context.AfterFunc(ctx2, func() {
-				if err := conn.SetDeadline(time.Now()); err != nil {
-					log.Printf("failed to set incoming deadline: %s", err)
-				}
-				if err := serverConn.SetDeadline(time.Now()); err != nil {
-					log.Printf("failed to set outgoing deadline: %s", err)
-				}
+				setDeadlineWithLog(conn, time.Now(), "failed to set incoming deadline")
+				setDeadlineWithLog(serverConn, time.Now(), "failed to set outgoing deadline")
 			})
 			go func() {
 				defer wg.Done()
@@ -150,20 +167,14 @@ func main() {
 						return
 					default:
 					}
-					if err1 := conn.SetReadDeadline(time.Now().Add(time.Minute * 30)); err1 != nil {
-						log.Printf("Failed: %s", err1)
-						return
-					}
+					setReadDeadlineWithLog(conn, time.Now().Add(30*time.Minute), "failed to set incoming read deadline")
 					n, err1 := conn.Read(buf)
 					if err1 != nil {
 						log.Printf("Failed: %s", err1)
 						return
 					}
 
-					if err1 := serverConn.SetWriteDeadline(time.Now().Add(time.Minute * 30)); err1 != nil {
-						log.Printf("Failed: %s", err1)
-						return
-					}
+					setWriteDeadlineWithLog(serverConn, time.Now().Add(30*time.Minute), "failed to set outgoing write deadline")
 					_, err1 = serverConn.Write(buf[:n])
 					if err1 != nil {
 						log.Printf("Failed: %s", err1)
@@ -181,20 +192,14 @@ func main() {
 						return
 					default:
 					}
-					if err1 := serverConn.SetReadDeadline(time.Now().Add(time.Minute * 30)); err1 != nil {
-						log.Printf("Failed: %s", err1)
-						return
-					}
+					setReadDeadlineWithLog(serverConn, time.Now().Add(30*time.Minute), "failed to set outgoing read deadline")
 					n, err1 := serverConn.Read(buf)
 					if err1 != nil {
 						log.Printf("Failed: %s", err1)
 						return
 					}
 
-					if err1 := conn.SetWriteDeadline(time.Now().Add(time.Minute * 30)); err1 != nil {
-						log.Printf("Failed: %s", err1)
-						return
-					}
+					setWriteDeadlineWithLog(conn, time.Now().Add(30*time.Minute), "failed to set incoming write deadline")
 					_, err1 = conn.Write(buf[:n])
 					if err1 != nil {
 						log.Printf("Failed: %s", err1)
