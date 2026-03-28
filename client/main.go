@@ -22,15 +22,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bschaatsbergen/dnsdialer"
-	"github.com/cbeuw/connutil"
-	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
-	"github.com/pion/dtls/v3"
-	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
-	"github.com/pion/logging"
-	"github.com/pion/turn/v5"
-
 	"github.com/cbeuw/connutil"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -164,7 +155,6 @@ func getVkCreds(link string) (string, string, string, error) {
 				MaxIdleConns:        100,
 				MaxIdleConnsPerHost: 100,
 				IdleConnTimeout:     90 * time.Second,
-				DialContext:         dialer.DialContext,
 			},
 		}
 		defer client.CloseIdleConnections()
@@ -940,15 +930,7 @@ func main() { //nolint:cyclop
 		parts := strings.Split(*vklink, "join/")
 		link = parts[len(parts)-1]
 
-		dialer := dnsdialer.New(
-			dnsdialer.WithResolvers("77.88.8.8:53", "77.88.8.1:53", "8.8.8.8:53", "8.8.4.4:53", "1.1.1.1:53"),
-			dnsdialer.WithStrategy(dnsdialer.Fallback{}),
-			dnsdialer.WithCache(100, 10*time.Hour, 10*time.Hour),
-		)
-
-		getCreds = func(s string) (string, string, string, error) {
-			return getVkCreds(s, dialer)
-		}
+		getCreds = getVkCreds
 		if *n <= 0 {
 			*n = 16
 		}
